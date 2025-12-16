@@ -16,7 +16,7 @@ fi
 
 install_dependencies() {
   apt update -y
-  apt install -y curl sudo wget gnupg certbot docker.io
+  apt install -y curl sudo wget gnupg certbot docker.io unzip composer
   systemctl enable --now docker
 }
 
@@ -46,18 +46,17 @@ setup_cloudflare_tunnel() {
     apt install -y cloudflared
   fi
 
-  echo "🔐 Login to Cloudflare"
   cloudflared tunnel login
 
   read -p "Tunnel name: " TUNNEL_NAME
-  cloudflared tunnel create $TUNNEL_NAME
+  cloudflared tunnel create "$TUNNEL_NAME"
 
   TUNNEL_ID=$(cloudflared tunnel list | grep "$TUNNEL_NAME" | awk '{print $1}')
 
   read -p "Domain (panel.example.com): " DOMAIN
   read -p "Local panel port (80/443): " PORT
 
-  cloudflared tunnel route dns $TUNNEL_NAME $DOMAIN
+  cloudflared tunnel route dns "$TUNNEL_NAME" "$DOMAIN"
 
   mkdir -p /etc/cloudflared
 
@@ -74,8 +73,43 @@ EOF
   cloudflared service install
   systemctl restart cloudflared
 
-  echo ""
   echo "✅ Tunnel live at https://$DOMAIN"
+}
+
+install_reviactyl() {
+  clear
+  echo -e "${COLOR}Installing Reviactyl Panel Theme${NC}"
+
+  if [ ! -f /var/www/pterodactyl/artisan ]; then
+    echo "❌ Pterodactyl Panel not found!"
+    echo "👉 Install Pterodactyl Panel first."
+    sleep 3
+    return
+  fi
+
+  echo "⚠️ This will REPLACE panel files"
+  read -p "Continue? (yes/no): " confirm
+  [ "$confirm" != "yes" ] && return
+
+  cd /var/www/pterodactyl
+  rm -rf *
+
+  curl -Lo panel.tar.gz https://github.com/reviactyl/panel/releases/latest/download/panel.tar.gz
+  tar -xzvf panel.tar.gz
+  rm panel.tar.gz
+
+  chmod -R 755 storage/* bootstrap/cache/
+
+  COMPOSER_ALLOW_SUPERUSER=1 composer install --no-dev --optimize-autoloader
+
+  php artisan migrate --seed --force
+
+  chown -R www-data:www-data /var/www/pterodactyl/*
+
+  systemctl restart pteroq.service
+
+  echo ""
+  echo "✅ Reviactyl Panel installed successfully!"
 }
 
 fix_panel() {
@@ -93,10 +127,11 @@ while true; do
   echo "   $BRAND • Pterodactyl Auto Installer"
   echo "=============================================="
   echo -e "${NC}"
-  echo "1) Install Panel (Admin user included)"
+  echo "1) Install Pterodactyl Panel (Admin included)"
   echo "2) Install Wings"
-  echo "3) Setup Cloudflare Tunnel (No Ports)"
-  echo "4) Fix / Repair Panel"
+  echo "3) Setup Cloudflare Tunnel"
+  echo "4) Install Reviactyl Panel"
+  echo "5) Fix / Repair Panel"
   echo "0) Exit"
   echo ""
   read -p "Select option: " option
@@ -114,6 +149,9 @@ while true; do
       setup_cloudflare_tunnel
       ;;
     4)
+      install_reviactyl
+      ;;
+    5)
       fix_panel
       ;;
     0)
