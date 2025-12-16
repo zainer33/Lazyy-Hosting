@@ -34,12 +34,10 @@ install_wings() {
 setup_cloudflare_tunnel() {
   clear
   echo -e "${COLOR}Cloudflare Tunnel Setup${NC}"
-
   if ! command -v cloudflared &>/dev/null; then
     curl -fsSL https://pkg.cloudflare.com/install.sh | bash
     apt install -y cloudflared
   fi
-
   cloudflared tunnel login
   read -p "Tunnel name: " TUNNEL_NAME
   cloudflared tunnel create "$TUNNEL_NAME"
@@ -87,18 +85,27 @@ install_reviactyl() {
 enable_ddos_protection() {
   clear
   echo -e "${COLOR}Enabling DDoS Protection${NC}"
+  # ensure fail2ban installed
+  apt update -y
+  apt install -y fail2ban iptables-persistent
+  systemctl enable --now fail2ban
+  mkdir -p /etc/fail2ban
   cat <<EOF >/etc/fail2ban/jail.local
 [DEFAULT]
 bantime = 3600
 findtime = 600
 maxretry = 5
 backend = systemd
+
 [sshd]
 enabled = true
+
 [nginx-http-auth]
 enabled = true
+
 [nginx-limit-req]
 enabled = true
+
 [nginx-botsearch]
 enabled = true
 EOF
