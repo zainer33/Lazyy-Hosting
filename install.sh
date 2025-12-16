@@ -33,12 +33,6 @@ install_panel() {
   echo "Access your panel at: https://$PANEL_DOMAIN"
 }
 
-install_wings() {
-  clear
-  echo -e "${COLOR}Installing Wings...${NC}"
-  bash <(curl -s https://raw.githubusercontent.com/pterodactyl-installer/pterodactyl-installer/master/install.sh) wings
-}
-
 setup_cloudflare_tunnel() {
   clear
   echo -e "${COLOR}Cloudflare Tunnel Setup${NC}"
@@ -104,21 +98,19 @@ while true; do
   echo "   $BRAND • Pterodactyl Auto Installer"
   echo "==============================================${NC}"
   echo "1) Install Pterodactyl Panel (Admin included)"
-  echo "2) Install Wings"
-  echo "3) Setup Cloudflare Tunnel"
-  echo "4) Install Reviactyl Panel"
-  echo "5) Install Panel with custom IPv4/Domain"
-  echo "6) Fix / Repair Panel"
+  echo "2) Setup Cloudflare Tunnel"
+  echo "3) Install Reviactyl Panel"
+  echo "4) Install Panel with custom IPv4/Domain"
+  echo "5) Fix / Repair Panel"
   echo "0) Exit"
   read -p "Select option: " option
 
   case $option in
     1) install_dependencies; install_panel ;;
-    2) install_dependencies; install_wings ;;
-    3) setup_cloudflare_tunnel ;;
-    4) install_reviactyl ;;
-    5) install_dependencies; install_panel ;;
-    6) fix_panel ;;
+    2) setup_cloudflare_tunnel ;;
+    3) install_reviactyl ;;
+    4) install_dependencies; install_panel ;;
+    5) fix_panel ;;
     0) exit ;;
     *) echo "❌ Invalid option"; sleep 2 ;;
   esac
