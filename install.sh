@@ -12,12 +12,13 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
-# ================== DEPENDENCIES (FIXED) ==================
+PTERO_DIR="/var/www/pterodactyl"
+
+# ================== DEPENDENCIES ==================
 install_dependencies() {
   echo "▶ Installing system dependencies..."
   apt update -y
 
-  # Remove conflicting docker/containerd packages
   apt remove -y \
     containerd \
     docker \
@@ -28,7 +29,6 @@ install_dependencies() {
 
   apt autoremove -y
 
-  # Base packages
   apt install -y \
     ca-certificates \
     curl \
@@ -36,35 +36,84 @@ install_dependencies() {
     lsb-release \
     unzip \
     sudo \
-    composer
+    composer \
+    git
 
-  # Install Docker safely (official method)
   curl -fsSL https://get.docker.com | bash
-
   systemctl enable --now docker
+
   echo "✅ Dependencies installed"
 }
 
-# ================== PANEL INSTALL ==================
-install_panel() {
+# ================== CHECK PANEL ==================
+check_panel() {
+  if [ ! -f "$PTERO_DIR/artisan" ]; then
+    echo "❌ Pterodactyl panel not found at $PTERO_DIR"
+    echo "👉 Install Pterodactyl panel first"
+    sleep 3
+    return 1
+  fi
+  return 0
+}
+
+# ================== UNINSTALL THEME ==================
+uninstall_theme() {
   clear
-  echo -e "${COLOR}▶ Pterodactyl Panel Installer${NC}"
+  echo -e "${COLOR}▶ Uninstall Custom Theme${NC}"
 
-  read -p "Enter Panel Domain or IPv4: " PANEL_DOMAIN
+  check_panel || return
 
-  bash <(curl -s https://raw.githubusercontent.com/pterodactyl-installer/pterodactyl-installer/master/install.sh)
+  read -p "⚠️ This will restore DEFAULT Pterodactyl theme. Continue? (yes/no): " confirm
+  [ "$confirm" != "yes" ] && return
 
-  echo ""
-  echo "▶ Creating Admin User"
-  php /var/www/pterodactyl/artisan p:user:make
+  cd $PTERO_DIR
 
-  echo ""
-  echo "✅ Panel Installed Successfully"
-  echo "🌐 Panel URL: https://$PANEL_DOMAIN"
+  echo "▶ Re-downloading official panel files..."
+  curl -Lo panel.tar.gz https://github.com/pterodactyl/panel/releases/latest/download/panel.tar.gz
+  tar -xzvf panel.tar.gz
+  rm panel.tar.gz
+
+  chmod -R 755 storage/* bootstrap/cache/
+  COMPOSER_ALLOW_SUPERUSER=1 composer install --no-dev --optimize-autoloader
+  php artisan migrate --seed --force
+  chown -R www-data:www-data $PTERO_DIR/*
+  systemctl restart pteroq.service
+
+  echo "✅ Theme removed, default panel restored"
   read -p "Press Enter to continue..."
 }
 
-# ================== CLOUDFARE TUNNEL ==================
+# ================== INSTALL BLUEPRINT ==================
+install_blueprint() {
+  clear
+  echo -e "${COLOR}▶ Install Pterodactyl Blueprint${NC}"
+
+  check_panel || return
+
+  cd $PTERO_DIR
+
+  if [ -d "blueprint" ]; then
+    echo "ℹ️ Blueprint already installed"
+    sleep 2
+    return
+  fi
+
+  echo "▶ Installing Blueprint..."
+  git clone https://github.com/BlueprintFramework/framework.git blueprint
+
+  cd blueprint
+  chmod +x blueprint.sh
+  ./blueprint.sh install
+
+  echo "▶ Finalizing..."
+  php $PTERO_DIR/artisan optimize:clear
+  systemctl restart pteroq.service
+
+  echo "✅ Blueprint installed successfully"
+  read -p "Press Enter to continue..."
+}
+
+# ================== CLOUDFLARE TUNNEL ==================
 setup_cloudflare_tunnel() {
   clear
   echo -e "${COLOR}▶ Cloudflare Tunnel Setup${NC}"
@@ -81,7 +130,7 @@ setup_cloudflare_tunnel() {
   TUNNEL_ID=$(cloudflared tunnel list | grep "$TUNNEL_NAME" | awk '{print $1}')
 
   read -p "Domain (panel.example.com): " DOMAIN
-  read -p "Local Port (80 or 443): " PORT
+  read -p "Local Port (80/443): " PORT
 
   cloudflared tunnel route dns "$TUNNEL_NAME" "$DOMAIN"
 
@@ -98,52 +147,24 @@ EOF
   cloudflared service install
   systemctl restart cloudflared
 
-  echo "✅ Cloudflare Tunnel Active at https://$DOMAIN"
-  read -p "Press Enter to continue..."
-}
-
-# ================== REVIACTYL PANEL ==================
-install_reviactyl() {
-  clear
-  echo -e "${COLOR}▶ Reviactyl Panel Installer${NC}"
-
-  if [ ! -f /var/www/pterodactyl/artisan ]; then
-    echo "❌ Pterodactyl Panel not installed"
-    sleep 2
-    return
-  fi
-
-  read -p "⚠️ Replace existing panel files? (yes/no): " confirm
-  [ "$confirm" != "yes" ] && return
-
-  cd /var/www/pterodactyl
-  rm -rf *
-
-  curl -Lo panel.tar.gz https://github.com/reviactyl/panel/releases/latest/download/panel.tar.gz
-  tar -xzvf panel.tar.gz
-  rm panel.tar.gz
-
-  chmod -R 755 storage/* bootstrap/cache/
-  COMPOSER_ALLOW_SUPERUSER=1 composer install --no-dev --optimize-autoloader
-  php artisan migrate --seed --force
-  chown -R www-data:www-data /var/www/pterodactyl/*
-  systemctl restart pteroq.service
-
-  echo "✅ Reviactyl Panel Installed"
+  echo "✅ Cloudflare Tunnel active"
   read -p "Press Enter to continue..."
 }
 
 # ================== PANEL FIX ==================
 fix_panel() {
   clear
-  echo -e "${COLOR}▶ Fixing Panel${NC}"
+  echo -e "${COLOR}▶ Fix / Repair Panel${NC}"
 
-  cd /var/www/pterodactyl
+  check_panel || return
+
+  cd $PTERO_DIR
   php artisan migrate --seed --force
+  php artisan optimize:clear
   php artisan queue:restart
   systemctl restart pteroq
 
-  echo "✅ Panel Fixed"
+  echo "✅ Panel fixed"
   read -p "Press Enter to continue..."
 }
 
@@ -153,20 +174,20 @@ while true; do
   echo -e "${COLOR}=============================================="
   echo "   $BRAND"
   echo "==============================================${NC}"
-  echo "1) Install Pterodactyl Panel"
-  echo "2) Install Panel with Custom IPv4 / Domain"
-  echo "3) Setup Cloudflare Tunnel"
-  echo "4) Install Reviactyl Panel"
+  echo "1) Install Dependencies"
+  echo "2) Uninstall Theme (Restore Default)"
+  echo "3) Install Blueprint"
+  echo "4) Setup Cloudflare Tunnel"
   echo "5) Fix / Repair Panel"
   echo "0) Exit"
   echo "----------------------------------------------"
   read -p "Select an option: " option
 
   case $option in
-    1) install_dependencies; install_panel ;;
-    2) install_dependencies; install_panel ;;
-    3) setup_cloudflare_tunnel ;;
-    4) install_reviactyl ;;
+    1) install_dependencies ;;
+    2) uninstall_theme ;;
+    3) install_blueprint ;;
+    4) setup_cloudflare_tunnel ;;
     5) fix_panel ;;
     0) exit ;;
     *) echo "❌ Invalid option"; sleep 2 ;;
